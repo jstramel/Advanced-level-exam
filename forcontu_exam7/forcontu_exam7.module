@@ -1,0 +1,305 @@
+<?php
+/**
+ * @file
+ * Forcontu Exam 7 Advanced Module
+ * Module file for Forcontu Exam 7 activites
+ */
+
+/**
+ * Implements hook_form_alter().
+ */
+function forcontu_exam7_form_alter(&$form, &$form_state, $form_id) {
+  /**
+    * This form should only appear for content types selected in the configuration.
+    * The settings are stored in the system_variable forcontu_exam7_node_types and
+    * have the value 0 if not enabled.
+    */
+
+  if (isset($form['#node'])) {
+    $enabled_types = variable_get('forcontu_exam7_node_types');
+    $current_type =  $form['#node']->type;
+
+    if (($enabled_types[$current_type] !== 0) && ($form_id == $current_type . '_node_form')) {
+      $form['forcontu_exam'] = array(
+        '#type' => 'fieldset',
+        '#title' => t('Forcontu Exam'),
+        '#collapsible' => TRUE,
+        '#collapsed' => FALSE,
+        '#weight' => '50',
+      );
+      $form['forcontu_exam']['needs_review'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Specialist: Check if you want to request a review by the coordinator'),
+        '#default_value' => isset($form['#node']->needs_review) ? $form['#node']->needs_review : 0,
+      );
+      $form['forcontu_exam']['reviewed'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Coordinator: Check when review is complete'),
+        '#default_value' => isset($form['#node']->reviewed) ? $form['#node']->reviewed : 0,
+      );
+      $form['forcontu_exam']['note'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Write the note to send to the coordinator'),
+        '#size' => 100,
+        '#maxlength' => 400,
+        '#default_value' => isset($form['#node']->note) ? $form['#node']->note : '',
+      );
+      $form['forcontu_exam']['coordinator'] = array(
+        '#type' => 'select',
+        '#title' => t('Select the user coordinator to which the note will be sent'),
+        '#options' => find_users_by_role('coordinator'),
+        '#empty_option' => t('Select any'),
+        '#default_value' => isset($form['#node']->coordinator) ? $form['#node']->coordinator : 0,
+      );
+    }
+  }
+}
+
+/**
+ * Function to create an array of users of a specified role
+ * @param: role_name - the role name to search
+ */
+
+function find_users_by_role($role_name) {
+  $role = user_role_load_by_name($role_name);
+
+  $query = db_select('users', 'u');
+  $query->join('users_roles', 'ur', 'u.uid = ur.uid');
+  $query->fields('u', array('uid', 'name'));
+  $query->condition('ur.rid', $role->rid, '=');
+  $results = $query->execute();
+
+  $users = array();
+
+  foreach ($results as $key => $value) {
+    $users[$value->uid] = $value->name;
+  }
+
+  return $users;
+}
+
+/**
+ * Implements hook_menu().
+ */
+function forcontu_exam7_menu() {
+    $items['admin/config/content/forcontu_exam7'] = array(
+    'title' => 'Forcontu Exam 7 settings',
+    'Description' => 'Settings for module Forcontu Exam 7',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('forcontu_exam7_admin_settings'),
+    'access callback' => 'user_access',
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'forcontu_exam7.admin.inc',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_node_validate().
+ */
+function forcontu_exam7_node_validate($node, $form, &$form_state) {
+  $enabled_types = variable_get('forcontu_exam7_node_types');
+  if ($enabled_types[$node->type] !== 0) {
+    /**
+     * If the "needs review" box is checked, validate that all other fields are
+     * filled in.
+     */
+    if ($form_state['values']['needs_review'] == 1) {
+      if ($form_state['values']['note'] == '') {
+        form_set_error('note', t('You must enter a note to the coordinator if you are marking content for review.'));
+      }
+      if ($form_state['values']['coordinator'] == '') {
+        form_set_error('coordinator', t('You must select a coordinator to review the content.'));
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_node_load().
+ */
+function forcontu_exam7_node_load($nodes, $types) {
+  $enabled_types = variable_get('forcontu_exam7_node_types');
+
+  foreach ($nodes as $node) {
+    if ($enabled_types[$node->type] !== 0) {
+      $results = db_select('forcontu_exam7', 'f')
+        ->fields('f')
+        ->condition('f.nid', $node->nid)
+        ->execute();
+
+      foreach ($results as $result) {
+        $node->needs_review = $result->needs_review;
+        $node->reviewed = $result->reviewed;
+        $node->note = $result->note;
+        $node->coordinator = $result->uid;
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_node_insert().
+ */
+function forcontu_exam7_node_insert($node) {
+  $enabled_types = variable_get('forcontu_exam7_node_types');
+
+  if ($enabled_types[$node->type] !== 0) {
+    if ($node->needs_review == 1) {
+      $results = db_insert('forcontu_exam7')
+        ->fields(array(
+            'nid' => $node->nid,
+            'note' => $node->note,
+            'uid' => $node->coordinator,
+            'needs_review' => $node->needs_review,
+            'reviewed' => $node->reviewed,
+        ))
+        ->execute();
+        // If content is marked for review, send email to coordinator
+        if ($node->needs_review == 1) {
+          $coordinator = user_load($node->coordinator);
+          $params['node'] = $node;
+          drupal_mail('forcontu_exam7', 'email_coordinator', $coordinator->mail, user_preferred_language($coordinator), $params);
+        }
+
+        // If content is marked reviewed, send email to author
+        if ($node->reviewed == 1) {
+          $author = user_load($node->uid);
+          $params['node'] = $node;
+          drupal_mail('forcontu_exam7', 'email_specialist', $author->mail, user_preferred_language($author), $params);
+        }
+      }
+    }
+}
+
+/**
+ * Implements hook_node_update().
+ */
+function forcontu_exam7_node_update($node) {
+  $enabled_types = variable_get('forcontu_exam7_node_types');
+
+  if ($enabled_types[$node->type] !== 0) {
+    // Need to see if there is a record in the forcontu_exam7 table.
+    // If there is update the current record.
+    // Otherwise, create a new record if the "needs review" flag is set
+    $records = db_query("SELECT * FROM {forcontu_exam7} WHERE nid = :nid", array(':nid' => $node->nid));
+    if ($records->rowCount() > 0) {
+      $results = db_update('forcontu_exam7')
+        ->fields(array(
+            'note' => $node->note,
+            'uid' => $node->coordinator,
+            'needs_review' => $node->needs_review,
+            'reviewed' => $node->reviewed,
+            ))
+        ->condition('nid', $node->nid, '=')
+        ->execute();
+      // If content was newly marked for review, send email to coordinator.
+      if ($node->needs_review == 1 && $node->original->needs_review == 0) {
+        $coordinator = user_load($node->coordinator);
+        $params['node'] = $node;
+        drupal_mail('forcontu_exam7', 'email_coordinator', $coordinator->mail, user_preferred_language($coordinator), $params);
+      }
+      // If content was newly marked reviewed, send email to author.
+      if ($node->reviewed == 1 && $node->original->reviewed == 0) {
+        $author = user_load($node->uid);
+        $params['node'] = $node;
+        drupal_mail('forcontu_exam7', 'email_specialist', $author->mail, user_preferred_language($author), $params);
+      }
+    }
+    // No existing record was found in the database, create a new entry and send email.
+    elseif ($node->needs_review == 1) {
+      $results = db_insert('forcontu_exam7')
+        ->fields(array(
+            'nid' => $node->nid,
+            'note' => $node->note,
+            'uid' => $node->coordinator,
+            'needs_review' => $node->needs_review,
+            'reviewed' => $node->reviewed,
+        ))
+        ->execute();
+        // If content was newly marked for review, send email to coordinator.
+      $coordinator = user_load($node->coordinator);
+      $params['node'] = $node;
+      drupal_mail('forcontu_exam7', 'email_coordinator', $coordinator->mail, user_preferred_language($coordinator), $params);
+    }
+  }
+}
+
+/**
+ * Implements hook_node_delete().
+ */
+function forcontu_exam7_node_delete($node) {
+  $enabled_types = variable_get('forcontu_exam7_node_types');
+
+  if ($enabled_types[$node->type] !== 0) {
+    $results = db_delete('forcontu_exam7')
+      ->condition('nid', $node->nid, '=')
+      ->execute();
+  }
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function forcontu_exam7_block_info() {
+  $blocks['forcontu_exam7'] = array(
+    'info' => t('Forcontu Exam 7'),
+    'cache' => DRUPAL_NO_CACHE,
+    'status' => 1,
+    'region' => 'sidebar_second',
+  );
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function forcontu_exam7_block_view($delta = '') {
+  $block = array();
+
+  switch ($delta) {
+    case 'forcontu_exam7':
+      $block['subject'] = t('Pending Revisions');
+      $output = '';
+      // Generate a list of node id's that need review and have not yet been reviewed.
+      $records = db_query('SELECT nid FROM {forcontu_exam7} where needs_review = 1 AND reviewed = 0');
+      if ($records->rowCount() > 0) {
+        // Load each node and output the title to the content.
+        foreach ($records as $record) {
+          $node = node_load($record->nid);
+          $output .= l(t($node->title), 'node/' . $node->nid) . "<br>";
+        }
+        $block['content'] = $output;
+      }
+      else {
+        // There is no content waiting to be reviewed.
+        $block['content'] = t('No pending content reviews');
+      }
+
+      break;
+
+  }
+  return $block;
+}
+
+/**
+ * Implements hook_mail().
+ */
+function forcontu_exam7_mail($key, &$message, $params) {
+  switch ($key) {
+    case 'email_coordinator':
+      $message['subject'] = t('Content marked for review');
+      $message['body'][] = t('Content titled "!title" has been marked for review with the following note: !note',
+        array('!title' => $params['node']->title, '!note' => $params['node']->note));
+    break;
+
+    case 'email_specialist':
+      $message['subject'] = t('Content has been reviewed');
+      $message['body'][] = t('The coordinator has finished reviewing your content, "!title."', array(
+                              '!title' => $params['node']->title));
+    break;
+
+  }
+}
+

@@ -1,0 +1,85 @@
+<?php
+/**
+ * @file
+ * Install file for Forcontu Exam 7 module
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function forcontu_exam7_schema() {
+  $schema['forcontu_exam7'] = array(
+    'description' => t('Table to store records from forcontu_exam7 module'),
+    'fields' => array(
+      'nid' => array(
+        'description' => 'The primary identifier.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'note' => array(
+        'type' => 'text',
+        'size' => 'medium',
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'needs_review' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'reviewed' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('nid'),
+  );
+  return $schema;
+}
+
+
+/**
+ * Define roles and their weight.
+ */
+function forcontu_exam7_default_roles() {
+  $roles = array();
+  $roles['specialist'] = array(
+    'name' => 'specialist',
+    'weight' => '3',
+  );
+  $roles['coordinator'] = array(
+    'name' => 'coordinator',
+    'weight' => '4',
+  );
+  return $roles;
+}
+
+/**
+ * Implements hook_install().
+ */
+function forcontu_exam7_install() {
+  // Call the array with your default roles.
+  $roles = forcontu_exam7_default_roles();
+  // Loop through the array.
+  foreach ($roles as $value) {
+    // Check that a role is not already returned.
+    if (!user_role_load_by_name($value)) {
+      $role = new stdClass(); // create your Class
+
+      // Match values to the role Class.
+      $role->name = $value['name'];
+      $role->weight = $value['weight'];
+
+      // Save the Role using Drupal's API.
+      user_role_save($role);
+    }
+  }
+}

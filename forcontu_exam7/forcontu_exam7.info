@@ -1,0 +1,7 @@
+name = "Forcontu Advanced Exam 7"
+description = "Module for Forcontu Advanced Exam 7 activities"
+core = 7.x
+files[] = forcontu_exam7.module
+files[] = forcontu_exam7.admin.inc
+configure = admin/config/content/forcontu_exam7
+package = My modules
